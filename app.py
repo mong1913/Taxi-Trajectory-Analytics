@@ -2,6 +2,7 @@ from dash import Dash, html, dcc, Input, Output
 import plotly.express as px
 import pandas as pd
 import numpy as np
+from src.util import map_click
 
 app = Dash(__name__)
 
@@ -11,6 +12,7 @@ df = pd.read_parquet("data/train_sample_silver.parquet")
 day_names = ['Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday', 'Sunday']
 call_type_order = ['A', 'B', 'C']
 call_type_colors = {'A': '#e41a1c', 'B': '#000000', 'C': '#377eb8'}
+radius_around_click = 0.5  # in kilometers on the map, used to filter trips around the clicked point
 # ---------------------------------------------------------------------------------------
 
 def haversine(lon1, lat1, lon2, lat2):
@@ -67,10 +69,7 @@ def update_graph(clickData):
     fig.update_traces(marker={'opacity': 0.9})
     
     if clickData:
-        lon = clickData['points'][0]['lon']
-        lat = clickData['points'][0]['lat']
-        dist = haversine(df['START_LON'], df['START_LAT'], lon, lat)
-        near = df[dist <= 0.5]  # Filter trips within 0.5 km
+        _, _, near = map_click(clickData, haversine, df, radius_around_click)
         highlight = px.scatter_map(near, lat='START_LAT', lon='START_LON')
         highlight.update_traces(marker={'color': 'orange', 'size': 12, 'opacity': 0.8})
         fig.add_trace(highlight.data[0])
@@ -82,16 +81,13 @@ def update_graph(clickData):
 )
 def update_pie(clickData):
     if clickData is None:
-        filtered_df = df
+        near = df
         title = "Call type share of the start points near this area"
     else:
-        lon = clickData['points'][0]['lon']
-        lat = clickData['points'][0]['lat']
-        dist = haversine(df['START_LON'], df['START_LAT'], lon, lat)
-        filtered_df = df[dist <= 0.5]  # Filter trips within 0.5 km
+        lon,lat, near = map_click(clickData, haversine, df, radius_around_click)
         title = f"Call type share of the start points near ({lon:.4f}, {lat:.4f})"
     
-    grouped_df = filtered_df.groupby(['HOUR', 'CALL_TYPE']).size().reset_index(name='COUNT')
+    grouped_df = near.groupby(['HOUR', 'CALL_TYPE']).size().reset_index(name='COUNT')
     fig = px.pie(
         grouped_df, values='COUNT', names='CALL_TYPE', title=title, color='CALL_TYPE',
         category_orders={'CALL_TYPE': call_type_order},
@@ -113,16 +109,13 @@ def update_box(clickData, trim_outliers):
         df_trimmed = df
 
     if clickData is None:
-        filtered_df = df_trimmed
+        near = df_trimmed
         title = "Trip Duration Distribution"
     else:
-        lon = clickData['points'][0]['lon']
-        lat = clickData['points'][0]['lat']
-        dist = haversine(df_trimmed['START_LON'], df_trimmed['START_LAT'], lon, lat)
-        filtered_df = df_trimmed[dist <= 0.5]  # Filter trips within 0.5 km
-        title = f"Trip Duration Distribution within 0.5 km of ({lon:.4f}, {lat:.4f})"
+        lon,lat, near = map_click(clickData, haversine, df, radius_around_click)
+        title = f"Trip Duration Distribution within {radius_around_click} km of ({lon:.4f}, {lat:.4f})"
     fig = px.box(
-        filtered_df, x='HOUR', y='TRIP_DURATION',
+        near, x='HOUR', y='TRIP_DURATION',
         title=title
     )
     return fig
@@ -133,16 +126,13 @@ def update_box(clickData, trim_outliers):
 )
 def update_line(clickData):
     if clickData is None:
-        filtered_df = df
-        title = "Trip Duration Distribution"
+        near = df
+        title = "Call type count over time"
     else:
-        lon = clickData['points'][0]['lon']
-        lat = clickData['points'][0]['lat']
-        dist = haversine(df['START_LON'], df['START_LAT'], lon, lat)
-        filtered_df = df[dist <= 0.5]  # Filter trips within 0.5 km
+        lon,lat, near = map_click(clickData, haversine, df, radius_around_click)
         title = f"Total count of each call type over time near ({lon:.4f}, {lat:.4f})"
     
-    grouped_df = filtered_df.groupby(['HOUR', 'CALL_TYPE']).size().reset_index(name='COUNT')
+    grouped_df = near.groupby(['HOUR', 'CALL_TYPE']).size().reset_index(name='COUNT')
     fig = px.line(
         grouped_df, x='HOUR', y='COUNT', color='CALL_TYPE',
         category_orders={'CALL_TYPE': call_type_order},
